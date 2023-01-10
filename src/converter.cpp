@@ -7,6 +7,7 @@
 #include <optional>
 #include <charconv>
 #include <string_view>
+#include <memory>
 #include <fmt/core.h>
 #include <CImg.h>
 #undef None
@@ -14,32 +15,27 @@
 #include "retrogfx.hpp"
 #include "cmdline.hpp"
 
-long filesize(FILE *f)
-{
-    fseek(f, 0, SEEK_END);
-    long res = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    return res;
-}
-
-template <typename T = int>
-std::optional<T> _conv(const char *start, const char *end, unsigned base = 10)
-{
-    static_assert(std::is_integral_v<T>, "T must be an integral numeric type");
-    T value = 0;
-    auto res = std::from_chars(start, end, value, base);
-    if (res.ec != std::errc() || res.ptr != end)
-        return std::nullopt;
-    return value;
-}
-
 template <typename T = int, typename TStr = std::string>
-std::optional<T> strconv(const TStr &str, unsigned base = 10)
+inline std::optional<T> to_number(const TStr &str, unsigned base = 10)
 {
-    return _conv<T>(str.data(), str.data() + str.size(), base);
+    auto helper = [](const char *start, const char *end, unsigned base) -> std::optional<T> {
+        T value = 0;
+        std::from_chars_result res;
+        if constexpr(std::is_floating_point_v<T>)
+            res = std::from_chars(start, end, value);
+        else
+            res = std::from_chars(start, end, value, base);
+        if (res.ec != std::errc() || res.ptr != end)
+            return std::nullopt;
+        return value;
+    };
+    if constexpr(std::is_same<std::decay_t<TStr>, char *>::value)
+        return helper(str, str + std::strlen(str), base);
+    else
+        return helper(str.data(), str.data() + str.size(), base);
 }
 
-int image_to_chr(const char *input, const char *output, int bpp, chr::DataMode mode)
+int image_to_chr(const char *input, const char *output, int bpp, retrogfx::DataMode mode)
 {
     int width, height, channels;
     unsigned char *img_data = stbi_load(input, &width, &height, &channels, 0);
@@ -55,10 +51,11 @@ int image_to_chr(const char *input, const char *output, int bpp, chr::DataMode m
         return 1;
     }
 
-    chr::Palette pal{bpp};
+    auto pal = retrogfx::grayscale_palette(bpp);
     auto tmp = std::span(img_data, width*height*channels);
-    auto data = chr::palette_to_indexed(tmp, pal, channels);
-    chr::to_chr(data, width, height, bpp, mode, [&](std::span<uint8_t> tile) {
+    std::vector<uint8_t> data;
+    retrogfx::make_indexed(tmp, pal, channels, [&](int x) { data.push_back(x); });
+    retrogfx::encode(data, width, height, bpp, mode, [&](std::span<uint8_t> tile) {
         fwrite(tile.data(), 1, tile.size(), out);
     });
 
@@ -66,7 +63,16 @@ int image_to_chr(const char *input, const char *output, int bpp, chr::DataMode m
     return 0;
 }
 
-int chr_to_image(const char *input, const char *output, int bpp, chr::DataMode mode)
+long filesize(FILE *f)
+{
+    long pos = ftell(f);
+    fseek(f, 0, SEEK_END);
+    long res = ftell(f);
+    fseek(f, pos, SEEK_SET);
+    return res;
+}
+
+int chr_to_image(const char *input, const char *output, int bpp, retrogfx::DataMode mode)
 {
     FILE *f = fopen(input, "r");
     if (!f) {
@@ -74,19 +80,23 @@ int chr_to_image(const char *input, const char *output, int bpp, chr::DataMode m
         std::perror("");
         return 1;
     }
+    long size = filesize(f);
+    auto ptr = std::make_unique<uint8_t[]>(size);
+    std::fread(ptr.get(), 1, size, f);
+    auto bytes = std::span{ptr.get(), std::size_t{size}};
 
-    size_t height = chr::img_height(filesize(f), bpp);
+    size_t height = retrogfx::img_height(size, bpp);
     cimg_library::CImg<unsigned char> img(16 * 8, height, 1, 4);
-    int y = 0;
 
     img.fill(0);
-    chr::Palette palette{bpp};
-    chr::to_indexed(f, bpp, mode, [&](std::span<uint8_t> row) {
+    auto pal = retrogfx::grayscale_palette(bpp);
+    int y = 0;
+    retrogfx::decode(bytes, bpp, mode, [&](std::span<uint8_t> row) {
         for (int x = 0; x < 128; x++) {
-            const auto color = palette[row[x]];
-            img(x, y, 0) = color.red();
-            img(x, y, 1) = color.green();
-            img(x, y, 2) = color.blue();
+            const auto color = pal[row[x]];
+            img(x, y, 0) = color.r;
+            img(x, y, 1) = color.g;
+            img(x, y, 2) = color.b;
             img(x, y, 3) = 0xFF;
         }
         y++;
@@ -98,19 +108,13 @@ int chr_to_image(const char *input, const char *output, int bpp, chr::DataMode m
     return 0;
 }
 
-bool select_mode(std::string_view arg, int &bpp, chr::DataMode &mode)
+std::optional<std::pair<int, retrogfx::DataMode>> select_mode(std::string_view arg)
 {
-    if (arg == "nes") {
-        bpp = 2;
-        mode = chr::DataMode::Planar;
-        return true;
-    }
-    if (arg == "snes") {
-        bpp = 4;
-        mode = chr::DataMode::Interwined;
-        return true;
-    }
-    return false;
+    if (arg == "nes")
+        return std::make_pair(2, retrogfx::DataMode::Planar);
+    if (arg == "snes")
+        return std::make_pair(4, retrogfx::DataMode::Interwined);
+    return std::nullopt;
 }
 
 using cmdline::ParamType;
@@ -139,7 +143,7 @@ int main(int argc, char *argv[])
     enum class Mode { TOIMG, TOCHR } mode = Mode::TOIMG;
     const char *input = NULL, *output = NULL;
     int bpp = 2;
-    chr::DataMode datamode = chr::DataMode::Planar;
+    retrogfx::DataMode datamode = retrogfx::DataMode::Planar;
 
     auto result = cmdline::parse(argc, argv, arglist);
     if (result.has('h')) {
@@ -151,27 +155,25 @@ int main(int argc, char *argv[])
     if (result.has('r'))
         mode = Mode::TOCHR;
     if (result.has('b')) {
-        auto num = strconv(result.params['b']);
+        auto num = to_number(result.params['b']);
         if (!num)
             fmt::print(stderr, "warning: invalid value {} for -b (default of 2 will be used)\n", argv[0]);
-        // else if (num.value() == 0 || num.value() > 8)
-        //     fmt::print(stderr, "warning: bpp can only be 1 to 8 (default of 2 will be used)\n");
+        else if (num.value() == 0 || num.value() > 8)
+            fmt::print(stderr, "warning: bpp can only be 1 to 8 (default of 2 will be used)\n");
         else
             bpp = num.value();
     }
     if (result.has('d')) {
-        auto param = result.params['d'];
-        if (param == "planar")
-            ; // default
-        else if (param == "interwined")
-            datamode = chr::DataMode::Interwined;
-        else if (param == "gba")
-            datamode = chr::DataMode::GBA;
+        if (auto r = retrogfx::string_to_datamode(result.params['d']); r)
+            datamode = r.value();
         else
             fmt::print(stderr, "warning: invalid argument {} for -d (default \"planar\" will be used)\n", argv[0]);
     }
     if (result.has('m')) {
-        if (!select_mode(result.params['m'], bpp, datamode))
+        if (auto o = select_mode(result.params['m']); o) {
+            bpp = o.value().first;
+            datamode = o.value().second;
+        } else
             fmt::print(stderr, "warning: invalid mode (defaults will be used)\n");
     }
 
@@ -184,5 +186,5 @@ int main(int argc, char *argv[])
     input = result.items[0].data();
 
     return mode == Mode::TOIMG ? chr_to_image(input, output ? output : "output.png", bpp, datamode)
-                               : image_to_chr(input, output ? output : "output.chr", bpp, datamode);
+                               : image_to_chr(input, output ? output : "output.bin", bpp, datamode);
 }

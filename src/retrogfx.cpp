@@ -1,6 +1,7 @@
 #include "retrogfx.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cassert>
 #include <cstring>
 #include <memory>
@@ -8,7 +9,7 @@
 using u8  = uint8_t;
 using u32 = uint32_t;
 
-namespace chr {
+namespace retrogfx {
 
 const int TILES_PER_ROW = 16;
 const int TILE_WIDTH = 8;
@@ -16,16 +17,20 @@ const int TILE_HEIGHT = 8;
 const int ROW_SIZE = TILES_PER_ROW * TILE_WIDTH;
 const int MAX_BPP = 8;
 
-namespace {
-    long filesize(FILE *f)
-    {
-        long pos = ftell(f);
-        fseek(f, 0, SEEK_END);
-        long res = ftell(f);
-        fseek(f, pos, SEEK_SET);
-        return res;
-    }
+template <typename T, std::size_t Width, std::size_t Height>
+class Array2D {
+    static_assert(Width != 0 || Height != 0, "Can't define an Array2D with 0 width or height");
+    T arr[Width*Height];
+public:
+    constexpr std::span<T>       operator[](std::size_t pos)       { return std::span{ arr+pos*Width, Width }; }
+    constexpr std::span<const T> operator[](std::size_t pos) const { return std::span{ arr+pos*Width, Width }; }
+    constexpr T *data() { return arr; }
+    constexpr const T *data() const { return arr; }
+    constexpr std::size_t width()  const { return Width; }
+    constexpr std::size_t height() const { return Height; }
+};
 
+namespace {
     constexpr inline uint64_t bitmask(uint8_t nbits)
     {
         return (1UL << nbits) - 1UL;
@@ -55,21 +60,20 @@ namespace {
     constexpr unsigned pow2(unsigned n)
     {
         int r = 1;
-        while (n-- > 0) {
+        while (n-- > 0)
             r *= 2;
-        }
         return r;
     }
 
     template <unsigned BPP>
-    constexpr std::array<ColorRGBA, pow2(BPP)> make_default_palette()
+    constexpr std::array<RGB, pow2(BPP)> make_default_palette()
     {
         constexpr unsigned N = pow2(BPP);
         constexpr uint8_t base = 0xFF / (N-1);
-        std::array<ColorRGBA, N> palette;
+        std::array<RGB, N> palette;
         for (unsigned i = 0; i < N; i++) {
             uint8_t value = base * i;
-            palette[i] = ColorRGBA{value, value, value, 0xFF};
+            palette[i] = RGB(value, value, value);
         }
         return palette;
     }
@@ -80,46 +84,27 @@ namespace {
     const auto palette_4bpp = make_default_palette<4>();
     const auto palette_8bpp = make_default_palette<8>();
 
-    std::span<const ColorRGBA> get_palette(int bpp)
+    RGB make_color(std::span<u8> data)
     {
-        switch (bpp) {
-        case 1:  return palette_1bpp;
-        case 2:  return palette_2bpp;
-        case 3:  return palette_3bpp;
-        case 4:  return palette_4bpp;
-        case 5:  return make_default_palette<5>();
-        case 6:  return make_default_palette<6>();
-        case 7:  return make_default_palette<7>();
-        case 8:  return palette_8bpp;
-        case 16: return make_default_palette<16>();
+        switch (data.size()) {
+        case 1: return RGB(data[0], data[0], data[0]);
+        case 3: return RGB(data[0], data[1], data[2]);
         default:
-            fprintf(stderr, "no default palette bpp of value %d\n", bpp);
-            return std::span<const ColorRGBA>{};
+            fprintf(stderr, "warning: unsupported number of channels (%ld)\n", data.size());
+            return RGB();
         }
+    }
+
+    int find_color(std::span<const RGB> p, RGB c)
+    {
+        auto it = std::find(p.begin(), p.end(), c);
+        return it != p.end() ? it - p.begin() : -1;
     }
 }
 
 
 
-Palette::Palette(int bpp)
-    : data(get_palette(bpp))
-{ }
-
-int Palette::find_color(ColorRGBA color) const
-{
-    auto it = std::find(data.begin(), data.end(), color);
-    return it != data.end() ? it - data.begin() : -1;
-}
-
-void Palette::dump() const
-{
-    for (auto color : data)
-        fprintf(stderr, "%02X %02X %02X\n", color.red(), color.green(), color.blue());
-}
-
-
-
-/* decoding functions (chr -> image) */
+/* decoding functions (gfx data -> image) */
 
 namespace {
 
@@ -198,7 +183,64 @@ namespace {
     }
 } // namespace
 
-void to_indexed(std::span<uint8_t> bytes, int bpp, DataMode mode, Callback draw_row)
+
+
+/* encoding functions (image -> gfx data) */
+
+namespace {
+    // encode single row of tile, returns a byte for each plane
+    std::array<u8, MAX_BPP> encode_row(std::span<u8> row, int bpp)
+    {
+        std::array<u8, MAX_BPP> bytes;
+        for (int i = 0; i < bpp; i++) {
+            u8 byte = 0;
+            for (int c = 0; c < 8; c++) {
+                u8 bits = row[c];
+                byte = setbit(byte, 7-c, getbit(bits, i));
+            }
+            bytes[i] = byte;
+        }
+        return bytes;
+    }
+
+    void encode_tile_planar(std::span<u8> res, std::span<u8> bytes, int bpp, int y)
+    {
+        for (int x = 0; x < bpp; x++)
+            res[y + x*8] = bytes[x];
+    }
+
+    void encode_tile_interwined(std::span<u8> res, std::span<u8> bytes, int bpp, int y)
+    {
+        for (int i = 0; i < bpp/2; i++) {
+            res[i*16 + y*2    ] = bytes[i*2  ];
+            res[i*16 + y*2 + 1] = bytes[i*2+1];
+        }
+        if (bpp % 2 != 0) {
+            int i = bpp/2;
+            res[i*16 + y] = bytes[i*2];
+        }
+    }
+
+    // loop over the rows of a single tile, returns bytes of encoded tile. si = start index
+    std::array<u8, MAX_BPP*8> encode_tile(std::span<u8> tiles, std::size_t si, std::size_t width, int bpp, DataMode mode)
+    {
+        std::array<u8, MAX_BPP*8> res;
+        for (int y = 0; y < TILE_HEIGHT; y++) {
+            std::size_t ri = si + y*width;
+            auto bytes = encode_row(tiles.subspan(ri, TILE_WIDTH), bpp);
+            switch (mode) {
+            case DataMode::Planar:     encode_tile_planar(    res, bytes, bpp, y); break;
+            case DataMode::Interwined: encode_tile_interwined(res, bytes, bpp, y); break;
+            default: break;
+            }
+        }
+        return res;
+    }
+}
+
+
+
+void decode(std::span<uint8_t> bytes, int bpp, DataMode mode, Callback draw_row)
 {
     // this loop inspect at most 16 tiles each iteration
     // the inner loop gets one single row of pixels and draws it
@@ -219,61 +261,7 @@ void to_indexed(std::span<uint8_t> bytes, int bpp, DataMode mode, Callback draw_
     }
 }
 
-void to_indexed(FILE *fp, int bpp, DataMode mode, Callback callback)
-{
-    long size = filesize(fp);
-    auto ptr = std::make_unique<u8[]>(size);
-    std::fread(ptr.get(), 1, size, fp);
-    to_indexed(std::span{ptr.get(), std::size_t(size)}, bpp, mode, callback);
-}
-
-
-
-/* encoding functions (image -> chr) */
-
-namespace {
-    // encode single row of tile, returns a byte for each plane
-    std::array<u8, MAX_BPP> encode_row(std::span<u8> row, int bpp)
-    {
-        std::array<u8, MAX_BPP> bytes;
-        for (int i = 0; i < bpp; i++) {
-            u8 byte = 0;
-            for (int c = 0; c < 8; c++) {
-                u8 bits = row[c];
-                byte = setbit(byte, 7-c, getbit(bits, i));
-            }
-            bytes[i] = byte;
-        }
-        return bytes;
-    }
-
-    // loop over the rows of a single tile, returns bytes of encoded tile. si = start index
-    std::array<u8, MAX_BPP*8> encode_tile(std::span<u8> tiles, std::size_t si,
-                                          std::size_t width, int bpp, DataMode mode)
-    {
-        std::array<u8, MAX_BPP*8> res;
-        for (int y = 0; y < TILE_HEIGHT; y++) {
-            std::size_t ri = si + y*width;
-            auto bytes = encode_row(tiles.subspan(ri, TILE_WIDTH), bpp);
-            if (mode == DataMode::Planar) {
-                for (int i = 0; i < bpp; i++)
-                    res[y + i*8] = bytes[i];
-            } else {
-                for (int i = 0; i < bpp/2; i++) {
-                    res[i*16 + y*2    ] = bytes[i*2  ];
-                    res[i*16 + y*2 + 1] = bytes[i*2+1];
-                }
-                if (bpp % 2 != 0) {
-                    int i = bpp/2;
-                    res[i*16 + y] = bytes[i*2];
-                }
-            }
-        }
-        return res;
-    }
-}
-
-void to_chr(std::span<u8> bytes, std::size_t width, std::size_t height, int bpp,
+void encode(std::span<u8> bytes, std::size_t width, std::size_t height, int bpp,
             DataMode mode, Callback write_data)
 {
     if (width % 8 != 0 || height % 8 != 0) {
@@ -290,6 +278,24 @@ void to_chr(std::span<u8> bytes, std::size_t width, std::size_t height, int bpp,
     }
 }
 
+void make_indexed(std::span<uint8_t> data, std::span<const RGB> palette, int channels, std::function<void(int)> output)
+{
+    for (std::size_t i = 0; i < data.size(); i += channels) {
+        auto index = find_color(palette, make_color(data.subspan(i, channels)));
+        if (index == -1) {
+            fprintf(stderr, "warning: color not present in palette\n");
+            output(0);
+        } else
+            output(index);
+    }
+}
+
+void apply_palette(std::span<int> data, std::span<const RGB> palette, std::function<void(RGB)> output)
+{
+    for (std::size_t i = 0; i < data.size(); i++)
+        output(palette[i]);
+}
+
 
 
 long img_height(std::size_t num_bytes, int bpp)
@@ -303,29 +309,21 @@ long img_height(std::size_t num_bytes, int bpp)
     return num_bytes / bpt / TILES_PER_ROW * 8;
 }
 
-HeapArray<uint8_t> palette_to_indexed(std::span<uint8_t> data, const Palette &palette, int channels)
+std::span<const RGB> grayscale_palette(int bpp)
 {
-    HeapArray<u8> output{data.size() / channels};
-    auto it = output.begin();
-
-    for (std::size_t i = 0; i < data.size(); i += channels) {
-        ColorRGBA color{data.subspan(i, channels)};
-        int index = palette.find_color(color);
-        if (index == -1) {
-            fprintf(stderr, "warning: color not present in palette\n");
-            *it++ = 0;
-        } else
-            *it++ = index;
+    switch (bpp) {
+    case 1:  return palette_1bpp;
+    case 2:  return palette_2bpp;
+    case 3:  return palette_3bpp;
+    case 4:  return palette_4bpp;
+    case 5:  return make_default_palette<5>();
+    case 6:  return make_default_palette<6>();
+    case 7:  return make_default_palette<7>();
+    case 8:  return palette_8bpp;
+    default:
+        fprintf(stderr, "no default palette bpp of value %d\n", bpp);
+        return std::span<const RGB>{};
     }
-    return output;
 }
 
-HeapArray<ColorRGBA> indexed_to_palette(std::span<uint8_t> data, const Palette &palette)
-{
-    HeapArray<ColorRGBA> output{data.size()};
-    for (std::size_t i = 0; i < data.size(); i++)
-        output[i] = palette[i];
-    return output;
-}
-
-} // namespace chr
+} // namespace retrogfx

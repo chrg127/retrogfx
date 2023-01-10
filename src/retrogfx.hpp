@@ -1,16 +1,16 @@
 #pragma once
 
 #include <array>
-#include <cstdio>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
-#include <memory>
+#include <string_view>
 
-namespace chr {
+namespace retrogfx {
 
-using Callback  = std::function<void(std::span<uint8_t>)>;
+using Callback = std::function<void(std::span<uint8_t>)>;
 
 enum class DataMode {
     Planar,
@@ -18,67 +18,47 @@ enum class DataMode {
     GBA,
 };
 
-class ColorRGBA {
-    std::array<uint8_t, 4> data;
+template <std::size_t N> struct ColorData;
+#define COLOR_DATA(N, ...)                                                      \
+    template <> struct ColorData<N> {                                           \
+        union { struct { uint8_t __VA_ARGS__; }; std::array<uint8_t, N> d; };   \
+        constexpr ColorData(auto... args) : d{args...} {}                       \
+    };
+COLOR_DATA(3, r, g, b)
+COLOR_DATA(4, r, g, b, a)
+#undef COLOR_DATA
 
-public:
-    constexpr ColorRGBA() = default;
-    constexpr ColorRGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) : data({r, g, b, a}) { }
-
-    explicit ColorRGBA(std::span<uint8_t> color)
+template <std::size_t N>
+struct Color : ColorData<N> {
+    Color() = default;
+    Color(auto... args) : ColorData<N>(args...) {}
+    Color(uint32_t value)
     {
-        if (color.size() == 1) {
-            data[0] = data[1] = data[2] = color[0];
-            data[3] = 0xFF;
-        } else {
-            data[0] = color[0];
-            data[1] = color[1];
-            data[2] = color[2];
-            data[3] = color.size() >= 4 ? color[3] : 0xFF;
-        }
+        for (auto i = 0u; i < N; i++)
+            this->d[i] = value >> ((N - 1 - i) * 8) & 0xff;
     }
-
-    constexpr uint8_t red() const   { return data[0]; }
-    constexpr uint8_t green() const { return data[1]; }
-    constexpr uint8_t blue() const  { return data[2]; }
-    constexpr uint8_t alpha() const { return data[3]; }
-    constexpr uint8_t operator[](std::size_t i) const { return data[i]; }
-    friend bool operator==(const ColorRGBA &c1, const ColorRGBA &c2);
+    uint8_t & operator[](std::size_t i) { return this->d[i]; }
+    template <std::size_t M> friend bool operator==(Color<M> a, Color<M> b);
 };
 
-inline bool operator==(const ColorRGBA &c1, const ColorRGBA &c2) { return c1.data == c2.data; }
+template <std::size_t N> bool operator==(Color<N> a, Color<N> b) { return a.d == b.d; }
 
-class Palette {
-    std::span<const ColorRGBA> data;
+using RGBA = Color<4>;
+using RGB  = Color<3>;
 
-public:
-    explicit Palette(int bpp);
-    explicit Palette(std::span<ColorRGBA> p) : data(p) {}
+inline std::optional<DataMode> string_to_datamode(std::string_view s)
+{
+    if (s == "planar")      return DataMode::Planar;
+    if (s == "interwined")  return DataMode::Interwined;
+    if (s == "gba")         return DataMode::GBA;
+    return std::nullopt;
+}
 
-    const ColorRGBA & operator[](std::size_t pos) const { return data[pos]; }
-    int find_color(ColorRGBA color) const;
-    void dump() const;
-};
-
-template <typename T>
-class HeapArray {
-    std::unique_ptr<T[]> ptr;
-    std::size_t len = 0;
-public:
-    HeapArray() = default;
-    explicit HeapArray(std::size_t s) : ptr(std::make_unique<T[]>(s)), len(s) {}
-    T *begin() const                { return ptr.get(); }
-    T *end()   const                { return ptr.get() + len; }
-    T *data()  const                { return ptr.get(); }
-    std::size_t size() const        { return len; }
-    T & operator[](std::size_t pos) { return ptr[pos]; }
-};
-
-void to_indexed(std::span<uint8_t> bytes, int bpp, DataMode mode, Callback draw_row);
-void to_indexed(FILE *fp, int bpp, DataMode mode, Callback draw_row);
-void to_chr(std::span<uint8_t> bytes, std::size_t width, std::size_t height, int bpp, DataMode mode, Callback write_data);
+void decode(std::span<uint8_t> bytes, int bpp, DataMode mode, Callback draw_row);
+void encode(std::span<uint8_t> bytes, std::size_t width, std::size_t height, int bpp, DataMode mode, Callback write_data);
+void make_indexed(std::span<uint8_t> data, std::span<const RGB> palette, int channels, std::function<void(int)> output);
+void apply_palette(std::span<std::size_t> data, std::span<const RGB> palette, std::function<void(RGB)> output);
 long img_height(std::size_t num_bytes, int bpp);
-HeapArray<uint8_t> palette_to_indexed(std::span<uint8_t> data, const Palette &palette, int channels);
-HeapArray<ColorRGBA> indexed_to_palette(std::span<uint8_t> data, const Palette &palette);
+std::span<const RGB> grayscale_palette(int bpp);
 
-} // namespace chr
+} // namespace retrogfx

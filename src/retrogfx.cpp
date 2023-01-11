@@ -86,12 +86,6 @@ namespace {
 
 
 namespace decoders {
-
-    // the 'planar' format is a format that takes each pixel's value
-    // and splits them into more 'bit-planes':
-    // first bit-plane is a collection of the least significant bits
-    // last bit-plane is a collection of the most significant bits
-    // nth bit-plane is a collection of the nth bits (for each pixel)
     u8 planar(std::span<u8> tile, int y, int x, int bpp)
     {
         u8 nbit = 7 - x;
@@ -129,9 +123,9 @@ namespace decoders {
     // two pixels.
     u8 gba(std::span<u8> tile, int y, int x, int bpp)
     {
-        assert(bpp == 4);
-        int value = tile[y * 4 + (x/2)];
-        return getbits(value, x & 1 ? 4 : 0, 4);
+        assert((bpp == 4 || bpp == 8) && "GBA format can't use BPP values that aren't 4 or 8");
+        int version = getbit(bpp, 2); // 1 for 4, 0 for 8
+        return getbits(tile[y * bpp + (x >> version)], (x & version) << 2, bpp);
     }
 } // namespace decoders
 

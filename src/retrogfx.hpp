@@ -24,34 +24,6 @@ enum class Format {
     GBA,
 };
 
-template <std::size_t N> struct ColorData;
-#define COLOR_DATA(N, ...)                                                      \
-    template <> struct ColorData<N> {                                           \
-        union { struct { uint8_t __VA_ARGS__; }; std::array<uint8_t, N> d; };   \
-        constexpr ColorData(auto... args) : d{args...} {}                       \
-    };
-COLOR_DATA(3, r, g, b)
-COLOR_DATA(4, r, g, b, a)
-#undef COLOR_DATA
-
-template <std::size_t N>
-struct Color : ColorData<N> {
-    Color() = default;
-    Color(auto... args) : ColorData<N>(args...) {}
-    Color(uint32_t value)
-    {
-        for (auto i = 0u; i < N; i++)
-            this->d[i] = value >> ((N - 1 - i) * 8) & 0xff;
-    }
-    uint8_t & operator[](std::size_t i) { return this->d[i]; }
-    template <std::size_t M> friend bool operator==(Color<M> a, Color<M> b);
-};
-
-template <std::size_t N> bool operator==(Color<N> a, Color<N> b) { return a.d == b.d; }
-
-using RGBA = Color<4>;
-using RGB  = Color<3>;
-
 inline std::optional<Format> string_to_format(std::string_view s)
 {
     if (s == "planar")      return Format::Planar;
@@ -59,6 +31,8 @@ inline std::optional<Format> string_to_format(std::string_view s)
     if (s == "gba")         return Format::GBA;
     return std::nullopt;
 }
+
+using RGB = std::array<uint8_t, 3>;
 
 void decode(std::span<uint8_t> bytes, int bpp, Format mode, Callback draw_row);
 void encode(std::span<uint8_t> bytes, std::size_t width, std::size_t height, int bpp, Format mode, Callback write_data);

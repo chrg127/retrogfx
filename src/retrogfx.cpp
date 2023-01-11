@@ -54,7 +54,7 @@ namespace {
         std::array<RGB, N> palette;
         for (unsigned i = 0; i < N; i++) {
             uint8_t value = base * i;
-            palette[i] = RGB(value, value, value);
+            palette[i] = RGB{value, value, value};
         }
         return palette;
     }
@@ -68,11 +68,11 @@ namespace {
     RGB make_color(std::span<u8> data)
     {
         switch (data.size()) {
-        case 1: return RGB(data[0], data[0], data[0]);
-        case 3: return RGB(data[0], data[1], data[2]);
+        case 1: return RGB{data[0], data[0], data[0]};
+        case 3: return RGB{data[0], data[1], data[2]};
         default:
             std::fprintf(stderr, "warning: unsupported number of channels (%ld)\n", data.size());
-            return RGB();
+            return RGB{0, 0, 0};
         }
     }
 

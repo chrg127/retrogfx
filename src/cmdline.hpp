@@ -42,7 +42,7 @@ inline Result parse(int argc, char *argv[], std::span<const Argument> valid, aut
                  : curr.size() == 2 ? find_arg(curr[1], valid)
                  :                    valid.end();
         if (arg == valid.end()) {
-            warning(fmt::format("invalid argument: %s", curr));
+            warning(fmt::format("invalid argument: {}", curr));
             continue;
         }
         if (res.has(arg->short_opt)) {

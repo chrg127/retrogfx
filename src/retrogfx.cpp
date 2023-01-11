@@ -38,32 +38,28 @@ namespace {
         return getbits(num, bitno, 1);
     }
 
-    constexpr unsigned pow2(unsigned n)
-    {
-        int r = 1;
-        while (n-- > 0)
-            r *= 2;
-        return r;
-    }
+    constexpr unsigned pow2(unsigned n) { return n == 0 ? 1 : 2 * pow2(n-1); }
 
-    template <unsigned BPP>
-    constexpr std::array<RGB, pow2(BPP)> make_default_palette()
+    template <unsigned BPP, unsigned N = pow2(BPP)>
+    constexpr std::array<RGB, N> make_default_palette()
     {
-        constexpr unsigned N = pow2(BPP);
-        constexpr uint8_t base = 0xFF / (N-1);
+        constexpr u8 base = 0xFF / (N-1);
         std::array<RGB, N> palette;
-        for (unsigned i = 0; i < N; i++) {
-            uint8_t value = base * i;
-            palette[i] = RGB{value, value, value};
+        for (auto t = 0u; t < N; t++) {
+            u8 value = base * t;
+            palette[t] = RGB{value, value, value};
         }
         return palette;
     }
 
-    const auto palette_1bpp = make_default_palette<1>();
-    const auto palette_2bpp = make_default_palette<2>();
-    const auto palette_3bpp = make_default_palette<3>();
-    const auto palette_4bpp = make_default_palette<4>();
-    const auto palette_8bpp = make_default_palette<8>();
+    auto pal1bpp = make_default_palette<1>();
+    auto pal2bpp = make_default_palette<2>();
+    auto pal3bpp = make_default_palette<3>();
+    auto pal4bpp = make_default_palette<4>();
+    auto pal5bpp = make_default_palette<5>();
+    auto pal6bpp = make_default_palette<6>();
+    auto pal7bpp = make_default_palette<7>();
+    auto pal8bpp = make_default_palette<8>();
 
     RGB make_color(std::span<u8> data)
     {
@@ -90,11 +86,8 @@ namespace decoders {
     {
         u8 nbit = 7 - x;
         u8 res = 0;
-        for (int i = 0; i < bpp; i++) {
-            u8 byte = tile[y + i*8];
-            u8 bit  = getbit(byte, nbit);
-            res     = setbit(res, i, bit);
-        }
+        for (int i = 0; i < bpp; i++)
+            res = setbit(res, i, getbit(tile[y + i*8], nbit));
         return res;
     }
 
@@ -103,24 +96,16 @@ namespace decoders {
         u8 nbit = 7 - x;
         u8 res = 0;
         for (int i = 0; i < bpp/2; i++) {
-            u8 lowbyte = tile[i*16 + y*2    ];
-            u8 hibyte  = tile[i*16 + y*2 + 1];
-            u8 lowbit  = getbit(lowbyte, nbit);
-            u8 hibit   = getbit(hibyte,  nbit);
-            res        = setbit(res, i*2,     lowbit);
-            res        = setbit(res, i*2 + 1, hibit);
+            res = setbit(res, i*2,     getbit(tile[i*16 + y*2    ], nbit));
+            res = setbit(res, i*2 + 1, getbit(tile[i*16 + y*2 + 1], nbit));
         }
         if (bpp % 2 != 0) {
-            int i = bpp/2;
-            u8 byte = tile[i*16 + y];
-            u8 bit  = getbit(byte, nbit);
-            res     = setbit(res, i*2, bit);
+            auto i = bpp/2;
+            res = setbit(res, i*2, getbit(tile[i*16 + y], nbit));
         }
         return res;
     }
 
-    // gba format (4 bpp): 32 bytes per tile, each byte contains the value for
-    // two pixels.
     u8 gba(std::span<u8> tile, int y, int x, int bpp)
     {
         assert((bpp == 4 || bpp == 8) && "GBA format can't use BPP values that aren't 4 or 8");
@@ -280,14 +265,10 @@ long img_height(std::size_t num_bytes, int bpp)
 std::span<const RGB> grayscale_palette(int bpp)
 {
     switch (bpp) {
-    case 1:  return palette_1bpp;
-    case 2:  return palette_2bpp;
-    case 3:  return palette_3bpp;
-    case 4:  return palette_4bpp;
-    case 5:  return make_default_palette<5>();
-    case 6:  return make_default_palette<6>();
-    case 7:  return make_default_palette<7>();
-    case 8:  return palette_8bpp;
+    case 1: return pal1bpp; case 2: return pal2bpp;
+    case 3: return pal3bpp; case 4: return pal4bpp;
+    case 5: return pal5bpp; case 6: return pal6bpp;
+    case 7: return pal7bpp; case 8: return pal8bpp;
     default:
         std::fprintf(stderr, "no default palette bpp of value %d\n", bpp);
         return std::span<const RGB>{};

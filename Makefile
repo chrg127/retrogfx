@@ -6,8 +6,7 @@ CXX := g++
 CFLAGS := -I. -std=c11
 CXXFLAGS := -I. -std=c++20 -Wall -Wextra
 flags_deps = -MMD -MP -MF $(@:.o=.d)
-# libs := -lfmt -lm
-libs := -lfmt -L/usr/X11R6/lib -lm -lpthread -lX11 -lfmt
+libs := -lfmt -lm
 
 ifeq ($(build),debug)
     outdir := debug

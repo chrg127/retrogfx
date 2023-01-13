@@ -164,14 +164,28 @@ void decode(std::span<uint8_t> bytes, int bpp, Format mode, Callback draw_row)
 
 
 namespace encoders {
-    void planar(std::span<u8> res, std::span<u8> bytes, int bpp, int y)
+    std::array<u8, MAX_BPP> encode_planar_row(std::span<u8> row, int bpp)
     {
+        std::array<u8, MAX_BPP> bytes;
+        for (int i = 0; i < bpp; i++) {
+            u8 byte = 0;
+            for (int c = 0; c < 8; c++)
+                byte = setbit(byte, 7-c, getbit(row[c], i));
+            bytes[i] = byte;
+        }
+        return bytes;
+    }
+
+    void planar(std::span<u8> res, std::span<u8> row, int bpp, int y)
+    {
+        auto bytes = encode_planar_row(row, bpp);
         for (int x = 0; x < bpp; x++)
             res[y + x*8] = bytes[x];
     }
 
-    void interwined(std::span<u8> res, std::span<u8> bytes, int bpp, int y)
+    void interwined(std::span<u8> res, std::span<u8> row, int bpp, int y)
     {
+        auto bytes = encode_planar_row(row, bpp);
         for (int i = 0; i < bpp/2; i++) {
             res[i*16 + y*2    ] = bytes[i*2  ];
             res[i*16 + y*2 + 1] = bytes[i*2+1];
@@ -183,49 +197,30 @@ namespace encoders {
     }
 } // namespace encoders
 
-// encode single row of tile, returns a byte for each plane
-std::array<u8, MAX_BPP> encode_row(std::span<u8> row, int bpp)
+std::array<u8, MAX_BPP*TILE_HEIGHT> encode_tile(Span2D<u8> tile, int bpp, Format format)
 {
-    std::array<u8, MAX_BPP> bytes;
-    for (int i = 0; i < bpp; i++) {
-        u8 byte = 0;
-        for (int c = 0; c < 8; c++)
-            byte = setbit(byte, 7-c, getbit(row[c], i));
-        bytes[i] = byte;
-    }
-    return bytes;
-}
-
-// loop over the rows of a single tile, returns bytes of encoded tile. si = start index
-std::array<u8, MAX_BPP*8> encode_tile(std::span<u8> tiles, std::size_t si, std::size_t width, int bpp, Format mode)
-{
-    std::array<u8, MAX_BPP*8> res;
-    for (int y = 0; y < TILE_HEIGHT; y++) {
-        std::size_t ri = si + y*width;
-        auto bytes = encode_row(tiles.subspan(ri, TILE_WIDTH), bpp);
-        switch (mode) {
-        case Format::Planar:     encoders::planar(    res, bytes, bpp, y); break;
-        case Format::Interwined: encoders::interwined(res, bytes, bpp, y); break;
+    std::array<u8, MAX_BPP*TILE_HEIGHT> res;
+    for (auto y = 0u; y < TILE_HEIGHT; y++) {
+        switch (format) {
+        case Format::Planar:     encoders::planar(    res, tile[y], bpp, y); break;
+        case Format::Interwined: encoders::interwined(res, tile[y], bpp, y); break;
         default: break;
         }
     }
     return res;
 }
 
-// encodes (what is supposed to be) an indexed image to a specific format.
-void encode(std::span<u8> bytes, std::size_t width, std::size_t height, int bpp,
-            Format mode, Callback write_data)
+void encode(Span2D<u8> bytes, int bpp, Format format, Callback write_data)
 {
-    if (width % 8 != 0 || height % 8 != 0) {
+    if (bytes.width() % 8 != 0 || bytes.height() % 8 != 0) {
         std::fprintf(stderr, "error: width and height must be a power of 8");
         return;
     }
-
-    // j = tiles row, i = tile number in row
-    for (auto j = 0u; j < bytes.size(); j += width*TILE_HEIGHT) {
-        for (auto i = 0u; i < width; i += TILE_WIDTH) {
-            auto tile = encode_tile(bytes, j+i, width, bpp, mode);
-            std::span<u8> tilespan{tile.begin(), tile.begin() + bpp*8};
+    for (auto y = 0u; y < bytes.height(); y += 8) {
+        for (auto x = 0u; x < bytes.width(); x += 8) {
+            auto tile = bytes.subspan(x, y, 8, 8);
+            auto encoded = encode_tile(tile, bpp, format);
+            std::span<u8> tilespan{encoded.begin(), encoded.begin() + bpp*8};
             write_data(tilespan);
         }
     }

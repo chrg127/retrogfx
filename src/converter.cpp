@@ -43,14 +43,15 @@ int encode_image(std::string_view input, std::string_view output, int bpp, retro
     }
 
     auto pal = retrogfx::grayscale_palette(bpp);
+
     auto tmp = std::span(img_data, width*height*channels);
     std::vector<uint8_t> data;
     retrogfx::make_indexed(tmp, pal, channels, [&](int x) { data.push_back(x); });
+
     retrogfx::encode(data, width, height, bpp, format, [&](std::span<uint8_t> tile) {
         fwrite(tile.data(), 1, tile.size(), out);
     });
 
-    fmt::print("done\n");
     fclose(out);
     return 0;
 }
@@ -82,6 +83,7 @@ int decode_to_image(std::string_view input, std::string_view output, int bpp, re
     std::fill(img_data.get(), img_data.get() + retrogfx::ROW_SIZE * height * 3, 0);
 
     auto pal = retrogfx::grayscale_palette(bpp);
+
     int y = 0;
     retrogfx::decode(bytes, bpp, format, [&](std::span<uint8_t> row) {
         for (int x = 0; x < retrogfx::ROW_SIZE; x++) {

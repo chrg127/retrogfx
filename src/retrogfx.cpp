@@ -82,7 +82,7 @@ namespace {
 
 
 namespace decoders {
-    u8 planar(std::span<u8> tile, int y, int x, int bpp)
+    int planar(std::span<u8> tile, int y, int x, int bpp)
     {
         u8 nbit = 7 - x;
         u8 res = 0;
@@ -91,7 +91,7 @@ namespace decoders {
         return res;
     }
 
-    u8 interwined(std::span<u8> tile, int y, int x, int bpp)
+    int interwined(std::span<u8> tile, int y, int x, int bpp)
     {
         u8 nbit = 7 - x;
         u8 res = 0;
@@ -106,32 +106,34 @@ namespace decoders {
         return res;
     }
 
-    u8 gba(std::span<u8> tile, int y, int x, int bpp)
+    int gba(std::span<u8> tile, int y, int x, int bpp)
     {
-        assert((bpp == 4 || bpp == 8) && "GBA format can't use BPP values that aren't 4 or 8");
-        int version = getbit(bpp, 2); // 1 for 4, 0 for 8
-        return getbits(tile[y * bpp + (x >> version)], (x & version) << 2, bpp);
+        assert((bpp == 4 || bpp == 8)
+            && "GBA format can't use BPP values that aren't 4 or 8");
+        u8 version = getbit(bpp, 2); // 1 for 4, 0 for 8
+        return getbits(tile[y * bpp + (x >> version)],
+                       (x & version) << 2, bpp);
     }
 } // namespace decoders
 
-u8 decode_pixel(std::span<u8> tile, int row, int col, int bpp, Format mode)
+int decode_pixel(std::span<u8> tile, int row, int col, int bpp, Format mode)
 {
     switch (mode) {
     case Format::Planar:     return decoders::planar(tile, row, col, bpp);
     case Format::Interwined: return decoders::interwined(tile, row, col, bpp);
     case Format::GBA:        return decoders::gba(tile, row, col, bpp);
-    default:                   return 0;
+    default:                 return 0;
     }
 }
 
 // when converting tiles, they are converted row-wise, i.e. first we convert
 // the first row of every single tile, then the second, etc...
 // decode_pixel()'s job is to do the conversion for one single tile
-std::array<u8, ROW_SIZE> decode_row(std::span<u8> tiles, int y, int num_tiles,
+std::array<int, ROW_SIZE> decode_row(std::span<u8> tiles, int y, int num_tiles,
                                     int bpp, Format mode)
 {
     int bpt = bpp*8;
-    std::array<u8, ROW_SIZE> res;
+    std::array<int, ROW_SIZE> res;
     // n = tile number; x = tile column
     for (int n = 0; n < TILES_PER_ROW; n++) {
         std::span<u8> tile = tiles.subspan(n*bpt, bpt);
@@ -141,19 +143,21 @@ std::array<u8, ROW_SIZE> decode_row(std::span<u8> tiles, int y, int num_tiles,
     return res;
 }
 
-void decode(std::span<uint8_t> bytes, int bpp, Format mode, Callback draw_row)
+void decode(std::span<uint8_t> bytes, int bpp, Format mode,
+            std::function<void(std::span<int>)> draw_row)
 {
     // this loop inspect at most 16 tiles each iteration
     // the inner loop gets one single row of pixels and draws it
     int bpt = bpp*8;
     for (std::size_t i = 0; i < bytes.size(); i += bpt * TILES_PER_ROW) {
-        // calculate how many tiles we can get. can be at most 16 (TILES_PER_ROW)
+        // calculate how many tiles we can get. can be at most TILES_PER_ROW
         // this is necessary in case we are at the end and the number of tiles
-        // is not a multiple of 16.
+        // is not a multiple of TILES_PER_ROW.
         // division by bpt (bytes per tile) to go from bytes -> tiles
-        std::size_t count = std::min(bytes.size() - i, (std::size_t) bpt * TILES_PER_ROW);
+        std::size_t count     = std::min(bytes.size() - i,
+                                         (std::size_t) bpt * TILES_PER_ROW);
         std::size_t num_tiles = count / bpt;
-        std::span<u8> tiles = bytes.subspan(i, count);
+        std::span<u8> tiles   = bytes.subspan(i, count);
         for (int r = 0; r < TILE_HEIGHT; r++) {
             auto row = decode_row(tiles, r, num_tiles, bpp, mode);
             draw_row(row);
@@ -210,7 +214,8 @@ std::array<u8, MAX_BPP*TILE_HEIGHT> encode_tile(Span2D<u8> tile, int bpp, Format
     return res;
 }
 
-void encode(Span2D<u8> bytes, int bpp, Format format, Callback write_data)
+void encode(Span2D<u8> bytes, int bpp, Format format,
+            std::function<void(std::span<uint8_t>)> write_data)
 {
     if (bytes.width() % 8 != 0 || bytes.height() % 8 != 0) {
         std::fprintf(stderr, "error: width and height must be a power of 8");

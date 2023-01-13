@@ -58,7 +58,6 @@ inline std::optional<std::string_view> format_to_string(Format f)
     }
 }
 
-using Callback = std::function<void(std::span<uint8_t>)>;
 using RGB = std::array<uint8_t, 3>;
 
 template <typename T>
@@ -109,7 +108,7 @@ void decode(
     std::span<uint8_t> bytes,
     int bpp,
     Format format,
-    Callback draw_row
+    std::function<void(std::span<int>)> draw_row
 );
 
 /*
@@ -124,13 +123,13 @@ void encode(
     Span2D<uint8_t> bytes,
     int bpp,
     Format format,
-    Callback write_data
+    std::function<void(std::span<uint8_t>)> write_data
 );
 
 /* Helper function for encode(). */
 inline void encode(
     std::span<uint8_t> bytes, std::size_t width, std::size_t height, int bpp,
-    Format format, Callback write_data
+    Format format, std::function<void(std::span<uint8_t>)> write_data
 )
 {
     encode(Span2D<uint8_t>{bytes, width, height}, bpp, format, write_data);

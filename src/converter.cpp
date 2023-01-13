@@ -85,7 +85,7 @@ int decode_to_image(std::string_view input, std::string_view output, int bpp, re
     auto pal = retrogfx::grayscale_palette(bpp);
 
     int y = 0;
-    retrogfx::decode(bytes, bpp, format, [&](std::span<uint8_t> row) {
+    retrogfx::decode(bytes, bpp, format, [&](std::span<int> row) {
         for (int x = 0; x < retrogfx::ROW_SIZE; x++) {
             const auto color = pal[row[x]];
             auto i = y * retrogfx::ROW_SIZE * 3 + x * 3;

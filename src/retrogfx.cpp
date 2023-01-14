@@ -1,8 +1,9 @@
 #include "retrogfx.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <cassert>
+#include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <memory>
 
@@ -36,46 +37,6 @@ namespace {
     constexpr inline uint64_t getbit(uint64_t num, uint8_t bitno)
     {
         return getbits(num, bitno, 1);
-    }
-
-    constexpr unsigned pow2(unsigned n) { return n == 0 ? 1 : 2 * pow2(n-1); }
-
-    template <unsigned BPP, unsigned N = pow2(BPP)>
-    constexpr std::array<RGB, N> make_default_palette()
-    {
-        constexpr u8 base = 0xFF / (N-1);
-        std::array<RGB, N> palette;
-        for (auto t = 0u; t < N; t++) {
-            u8 value = base * t;
-            palette[t] = RGB{value, value, value};
-        }
-        return palette;
-    }
-
-    auto pal1bpp = make_default_palette<1>();
-    auto pal2bpp = make_default_palette<2>();
-    auto pal3bpp = make_default_palette<3>();
-    auto pal4bpp = make_default_palette<4>();
-    auto pal5bpp = make_default_palette<5>();
-    auto pal6bpp = make_default_palette<6>();
-    auto pal7bpp = make_default_palette<7>();
-    auto pal8bpp = make_default_palette<8>();
-
-    RGB make_color(std::span<u8> data)
-    {
-        switch (data.size()) {
-        case 1: return RGB{data[0], data[0], data[0]};
-        case 3: return RGB{data[0], data[1], data[2]};
-        default:
-            std::fprintf(stderr, "warning: unsupported number of channels (%ld)\n", data.size());
-            return RGB{0, 0, 0};
-        }
-    }
-
-    int find_color(std::span<const RGB> p, RGB c)
-    {
-        auto it = std::find(p.begin(), p.end(), c);
-        return it != p.end() ? it - p.begin() : -1;
     }
 }
 
@@ -231,18 +192,26 @@ void encode(Span2D<u8> bytes, int bpp, Format format,
     }
 }
 
-
-
-void make_indexed(std::span<uint8_t> data, std::span<const RGB> palette, int channels, std::function<void(int)> output)
+int find_color(Span2D<u8> palette, std::span<u8> color)
 {
-    for (std::size_t i = 0; i < data.size(); i += channels) {
-        auto index = find_color(palette, make_color(data.subspan(i, channels)));
-        if (index == -1) {
-            std::fprintf(stderr, "warning: color not present in palette\n");
-            output(0);
-        } else
-            output(index);
+    for (auto i = 0u; i < palette.height(); i++)
+        if (!std::memcmp(palette[i].data(), color.data(), color.size()))
+            return i;
+    return -1;
+}
+
+int make_indexed(Span2D<u8> data, Span2D<u8> palette,
+    std::function<void(std::size_t)> output)
+{
+    if (data.width() != palette.width())
+        return -2;
+    for (auto c = 0u; c < data.height(); c++) {
+        auto i = find_color(palette, data[c]);
+        if (i == -1)
+            return c;
+        output(i);
     }
+    return -1;
 }
 
 void apply_palette(std::span<int> data, std::span<const RGB> palette, std::function<void(RGB)> output)
@@ -262,17 +231,11 @@ long img_height(std::size_t num_bytes, int bpp)
     return num_bytes / bpt / TILES_PER_ROW * 8;
 }
 
-std::span<const RGB> grayscale_palette(int bpp)
+void grayscale_palette(int bpp, std::function<void(u8)> f)
 {
-    switch (bpp) {
-    case 1: return pal1bpp; case 2: return pal2bpp;
-    case 3: return pal3bpp; case 4: return pal4bpp;
-    case 5: return pal5bpp; case 6: return pal6bpp;
-    case 7: return pal7bpp; case 8: return pal8bpp;
-    default:
-        std::fprintf(stderr, "no default palette bpp of value %d\n", bpp);
-        return std::span<const RGB>{};
-    }
+    const unsigned n = bpp_size(bpp);
+    for (u8 t = 0; t < n; t++)
+        f(0xFF / (n-1) * t);
 }
 
 } // namespace retrogfx

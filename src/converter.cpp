@@ -26,6 +26,21 @@ std::optional<int> to_number(const TStr &str, unsigned base = 10)
     return value;
 }
 
+auto make_gray_pal(int bpp, int channels)
+{
+    auto f = [&](uint8_t v) {
+        switch (channels) {
+        case 1:  return std::vector<uint8_t>{v};
+        case 2:  return std::vector<uint8_t>{v, 0xff};
+        case 3:  return std::vector<uint8_t>{v, v, v};
+        default: return std::vector<uint8_t>{v, v, v, 0xff};
+        }
+    };
+    auto pal = std::vector<std::vector<uint8_t>>(retrogfx::bpp_size(bpp));
+    retrogfx::grayscale_palette(bpp, [&](uint8_t v) { pal.push_back(f(v)); });
+    return pal;
+}
+
 int encode_image(std::string_view input, std::string_view output, int bpp, retrogfx::Format format)
 {
     int width, height, channels;
@@ -42,11 +57,17 @@ int encode_image(std::string_view input, std::string_view output, int bpp, retro
         return 1;
     }
 
-    auto pal = retrogfx::grayscale_palette(bpp);
-
-    auto tmp = std::span(img_data, width*height*channels);
+    auto pal = make_gray_pal(bpp, channels);
+    auto tmp = retrogfx::Span2D(img_data, channels, width*height);
     std::vector<uint8_t> data;
-    retrogfx::make_indexed(tmp, pal, channels, [&](int x) { data.push_back(x); });
+    auto err = retrogfx::make_indexed(tmp, pal, [&](std::size_t i) { data.push_back(i); });
+    if (err != -1) {
+        if (err == -2)
+            fmt::print(stderr, "error: channel mismatch ({})\n", channels);
+        else
+            fmt::print(stderr, "error: color not found: {}\n", tmp[err][0]);
+        return 1;
+    }
 
     retrogfx::encode(data, width, height, bpp, format, [&](std::span<uint8_t> tile) {
         fwrite(tile.data(), 1, tile.size(), out);
@@ -79,23 +100,18 @@ int decode_to_image(std::string_view input, std::string_view output, int bpp, re
     auto bytes = std::span{ptr.get(), std::size_t(size)};
 
     size_t height = retrogfx::img_height(size, bpp);
-    auto img_data = std::make_unique<uint8_t[]>(retrogfx::ROW_SIZE * height * 3);
-    std::fill(img_data.get(), img_data.get() + retrogfx::ROW_SIZE * height * 3, 0);
+    size_t width  = retrogfx::ROW_SIZE;
+    auto img_data = std::make_unique<uint8_t[]>(retrogfx::ROW_SIZE * height);
 
-    auto pal = retrogfx::grayscale_palette(bpp);
-
+    auto pal = make_gray_pal(bpp, 1);
     int y = 0;
     retrogfx::decode(bytes, bpp, format, [&](std::span<int> row) {
-        for (int x = 0; x < retrogfx::ROW_SIZE; x++) {
-            const auto color = pal[row[x]];
-            auto i = y * retrogfx::ROW_SIZE * 3 + x * 3;
-            for (auto c = 0u; c < 3; c++)
-                img_data[i + c] = color[c];
-        }
+        for (int x = 0; x < width; x++)
+            img_data[y * width + x] = pal[row[x]][0];
         y++;
     });
 
-    stbi_write_png(output.data(), retrogfx::ROW_SIZE, height, 3, img_data.get(), 0);
+    stbi_write_png(output.data(), width, height, 1, img_data.get(), 0);
     fclose(f);
 
     return 0;

@@ -19,12 +19,11 @@ const int MAX_BPP = 8;
 
 enum class Format {
     /*
-     * This format takes each pixel's value
-     * and splits them into more 'bit-planes':
+     * This format takes each pixel's value and splits them into more bitplanes:
      * first bit-plane is a collection of the least significant bits;
      * last bit-plane is a collection of the most significant bits;
-     * in general nth bit-plane is a collection of the nth bits,
-     * all for each pixel
+     * in general the nth bit-plane is a collection of the nth bits, all for
+     * each pixel.
      */
     Planar,
 
@@ -59,14 +58,7 @@ inline std::optional<std::string_view> format_to_string(Format f)
     }
 }
 
-using RGB = std::array<uint8_t, 3>;
-
-template <typename T>
-concept ContainerType = requires(T t) {
-    t.data();
-    t.size();
-};
-
+/* A 2D view over a 1D array. Used on functions below. */
 template <typename T>
 struct Span2D {
     T *d;
@@ -118,10 +110,11 @@ struct Span2D {
 
 /*
  * Decodes a given array of bytes into an indexed image.
- * format describes the format of the bytes.
- * bpp describes how many bits per pixel to use (most formats accept any
+ * @bytes are the bytes to decode.
+ * @format describes the format of the bytes.
+ * @bpp describes how many bits per pixel to use (most formats accept any
  * number of bits per pixel, some may not).
- * draw_row is a callback function that will be called for each row of the
+ * @draw_row is a callback function that will be called for each row of the
  * resulting image. It has as input an array of indexes.
  */
 void decode(
@@ -134,9 +127,10 @@ void decode(
 /*
  * Encodes a given array of bytes, formatted as an indexed image, to a given
  * format.
- * bytes is a 2D view over the array of bytes.
- * bpp is the bits per pixel to use; some formats may not support the given bpp.
- * write_data is a function that is called for each tile encoded. It has as
+ * @bytes is a 2D view over the array of bytes.
+ * @bpp is the bits per pixel to use; some formats may not support the given bpp.
+ * @format describes the format in which the bytes should be encoded.
+ * @write_data is a function that is called for each tile encoded. It has as
  * input the data of one tile encoded.
  */
 void encode(
@@ -159,18 +153,15 @@ inline void encode(
  * Creates an indexed image suitable for usage with encode(). To do so, it uses
  * a palette: each pixel of the image is looked up in the palette and, if found,
  * is sent a callback function.
- * data is the data of the image, assumed to be a collection of colors (but not
+ * @data is the data of the image, assumed to be a collection of colors (but not
  * an image)
- * palette is the palette to use.
- * output is a function that is called for each pixel, with input an index
+ * @palette is the palette to use.
+ * @output is a function that is called for each pixel, with input an index
  * into the palette.
  * data.width() and palette.width() is the number of channels the function uses.
  * Both values must be equal. It is up to the caller to make sure they match.
- * The function's return value is:
- *     -2 on channel mismatch
- *     -1 on success
- *     >= 0 if a color was not found, with the value indicating the index
- *     into the data.
+ * The function's return value is -1 on success, >= 0 if a color was not found,
+ * with the value indicating the index.
  */
 int make_indexed(
     Span2D<uint8_t> data,
@@ -199,16 +190,29 @@ int make_indexed(
 }
 
 /*
- * Applies a palette to an indexed image. The reverse of the function above.
+ * Applies a palette to an indexed image. The reverse of the functions above.
  * data is the data of the image, assumed to be an indexed image.
- * palette is the palette to use.
- * output is a callback function that is called for each index, with input
+ * @data is a collection of indexes.
+ * @palette is the palette to use.
+ * @output is a callback function that is called for each index, with input
  * a color.
  */
+template <unsigned Channels>
 void apply_palette(
     std::span<std::size_t> data,
-    std::span<const RGB> palette,
-    std::function<void(RGB)> output
+    std::span<const std::array<uint8_t, Channels>> palette,
+    std::function<void(std::array<uint8_t, Channels>)> output
+)
+{
+    for (auto i : data)
+        output(palette[i]);
+}
+
+/* Same as above, but the @channels parameter is not a constant. */
+void apply_palette(
+    std::span<std::size_t> data,
+    Span2D<uint8_t> palette,
+    std::function<void(std::span<uint8_t>)> output
 );
 
 /*
@@ -216,7 +220,7 @@ void apply_palette(
  * decoding. Before allocating space for an image, this function should be
  * used to find the resulting height (width should always be ROW_SIZE).
  * @num_bytes is the size of the data to decode.
- * @bpp is, as usual, the bytes per pixel.
+ * @bpp is the bytes per pixel the data uses.
  */
 long img_height(std::size_t num_bytes, int bpp);
 

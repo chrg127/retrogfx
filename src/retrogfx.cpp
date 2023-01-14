@@ -203,8 +203,7 @@ int find_color(Span2D<u8> palette, std::span<u8> color)
 int make_indexed(Span2D<u8> data, Span2D<u8> palette,
     std::function<void(std::size_t)> output)
 {
-    if (data.width() != palette.width())
-        return -2;
+    assert(data.width() == palette.width() && "mismatched channels")
     for (auto c = 0u; c < data.height(); c++) {
         auto i = find_color(palette, data[c]);
         if (i == -1)
@@ -214,9 +213,10 @@ int make_indexed(Span2D<u8> data, Span2D<u8> palette,
     return -1;
 }
 
-void apply_palette(std::span<int> data, std::span<const RGB> palette, std::function<void(RGB)> output)
+void apply_palette(std::span<std::size_t> data, Span2D<uint8_t> palette,
+    std::function<void(std::span<uint8_t>)> output)
 {
-    for (std::size_t i = 0; i < data.size(); i++)
+    for (auto i : data)
         output(palette[i]);
 }
 

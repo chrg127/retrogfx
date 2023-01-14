@@ -36,7 +36,7 @@ auto make_gray_pal(int bpp, int channels)
         default: return std::vector<uint8_t>{v, v, v, 0xff};
         }
     };
-    auto pal = std::vector<std::vector<uint8_t>>(retrogfx::bpp_size(bpp));
+    std::vector<std::vector<uint8_t>> pal;
     retrogfx::grayscale_palette(bpp, [&](uint8_t v) { pal.push_back(f(v)); });
     return pal;
 }

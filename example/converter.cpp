@@ -10,9 +10,13 @@
 #include <memory>
 #include <algorithm>
 #include <fmt/core.h>
-#undef None
+
+#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+
 #include "retrogfx.hpp"
 #include "cmdline.hpp"
 
@@ -154,21 +158,21 @@ static const cmdline::Argument arglist[] = {
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        fmt::print(stderr, "usage: chrconvert [file...]\n");
+        fmt::print(stderr, "usage: converter [file...]\n");
         cmdline::print_args(arglist);
         return 1;
     }
 
     auto result = cmdline::parse(argc, argv, arglist);
     if (result.has('h')) {
-        fmt::print(stderr, "usage: chrconvert [file...]\n");
+        fmt::print(stderr, "usage: converter [file...]\n");
         cmdline::print_args(arglist);
         return 0;
     }
 
     if (result.items.size() == 0) {
         fmt::print(stderr, "error: no file specified\n");
-        fmt::print(stderr, "usage: chrconvert [file...]\n");
+        fmt::print(stderr, "usage: converter [file...]\n");
         cmdline::print_args(arglist);
         return 1;
     } else if (result.items.size() > 1) {

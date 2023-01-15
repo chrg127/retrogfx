@@ -160,15 +160,26 @@ namespace encoders {
             res[i*16 + y] = bytes[i*2];
         }
     }
+
+    void gba(std::span<u8> res, std::span<u8> row, int bpp, int y)
+    {
+        u8 version = getbit(bpp, 2); // 1 for 4, 0 for 8
+        for (int x = 0; x < TILE_WIDTH; x++) {
+            // res[y * 4 + (x >> version)] |= (row[x] << ((x & version) << 2));
+            int i = y * 4 + (x >> version);
+            res[i] = setbits(res[i], (x & version) << 2, 8 >> version, row[x]);
+        }
+    }
 } // namespace encoders
 
 std::array<u8, MAX_BPP*TILE_HEIGHT> encode_tile(Span2D<u8> tile, int bpp, Format format)
 {
-    std::array<u8, MAX_BPP*TILE_HEIGHT> res;
+    std::array<u8, MAX_BPP*TILE_HEIGHT> res = {};
     for (auto y = 0u; y < TILE_HEIGHT; y++) {
         switch (format) {
         case Format::Planar:     encoders::planar(    res, tile[y], bpp, y); break;
         case Format::Interwined: encoders::interwined(res, tile[y], bpp, y); break;
+        case Format::GBA:        encoders::gba(       res, tile[y], bpp, y); break;
         default: break;
         }
     }

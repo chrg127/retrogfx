@@ -58,11 +58,11 @@ int encode_image(std::string_view input, std::string_view output, int bpp, retro
     }
 
     auto pal = make_gray_pal(bpp, channels);
-    auto tmp = retrogfx::Span2D(img_data, channels, width*height);
+    auto tmp = std::span<uint8_t>(img_data, channels*width*height);
     std::vector<uint8_t> data;
-    auto err = retrogfx::make_indexed(tmp, pal, [&](std::size_t i) { data.push_back(i); });
+    auto err = retrogfx::make_indexed(tmp, std::span(pal), channels, [&](std::size_t i) { data.push_back(i); });
     if (err >= 0) {
-        fmt::print(stderr, "error: color not found: {}\n", tmp[err][0]);
+        fmt::print(stderr, "error: color not found at index {}\n", err);
         return 1;
     }
 

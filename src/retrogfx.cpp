@@ -192,34 +192,6 @@ void encode(Span2D<u8> bytes, int bpp, Format format,
     }
 }
 
-int find_color(Span2D<u8> palette, std::span<u8> color)
-{
-    for (auto i = 0u; i < palette.height(); i++)
-        if (!std::memcmp(palette[i].data(), color.data(), color.size()))
-            return i;
-    return -1;
-}
-
-int make_indexed(Span2D<u8> data, Span2D<u8> palette,
-    std::function<void(std::size_t)> output)
-{
-    assert(data.width() == palette.width() && "mismatched channels")
-    for (auto c = 0u; c < data.height(); c++) {
-        auto i = find_color(palette, data[c]);
-        if (i == -1)
-            return c;
-        output(i);
-    }
-    return -1;
-}
-
-void apply_palette(std::span<std::size_t> data, Span2D<uint8_t> palette,
-    std::function<void(std::span<uint8_t>)> output)
-{
-    for (auto i : data)
-        output(palette[i]);
-}
-
 long img_height(std::size_t num_bytes, int bpp)
 {
     // We put 16 tiles on every row. If we have, for example, bpp = 2,

@@ -1,9 +1,11 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <optional>
 #include <span>
@@ -70,20 +72,7 @@ struct Span2D {
     { }
 
     constexpr Span2D(T *d, std::size_t w, std::size_t h) : Span2D(d, w, h, 0) { }
-
-    // constructor for taking a 1D collection.
-    template <typename R>
-    constexpr Span2D(R &&r, std::size_t w, std::size_t h)
-        requires requires (R a) { a.data(); }
-        : Span2D(r.data(), w, h)
-    { }
-
-    // constructor for taking a container<container<T>>.
-    template <typename R>
-    constexpr Span2D(R &&r)
-        requires requires(R a) { a.data(); a.size(); a[0].data(); a[0].size(); }
-        : Span2D((T *) r[0].data(), r[0].size(), r.size(), 0)
-    { }
+    template <typename R> constexpr Span2D(R &&r, std::size_t w, std::size_t h) : Span2D(r.data(), w, h) { }
 
     constexpr Span2D(const Span2D &) noexcept = default;
     constexpr Span2D& operator=(const Span2D &) noexcept = default;
@@ -149,42 +138,44 @@ inline void encode(
     encode(Span2D<uint8_t>{bytes, width, height}, bpp, format, write_data);
 }
 
+/* Finds @color in @palette. Returns the index or -1 if not found. */
+template <typename T>
+int find_color(std::span<T> palette, std::span<uint8_t> color)
+{
+    for (auto i = 0u; i < palette.size(); i++)
+        if (!std::memcmp(palette[i].data(), color.data(), color.size()))
+            return i;
+    return -1;
+}
+
 /*
  * Creates an indexed image suitable for usage with encode(). To do so, it uses
  * a palette: each pixel of the image is looked up in the palette and, if found,
  * is sent a callback function.
- * @data is the data of the image, assumed to be a collection of colors (but not
- * an image)
+ * @data is the data of the image, assumed to be a collection of colors of size
+ * being a multiple of @channels.
  * @palette is the palette to use.
+ * @channels indicates how many channels or components the colors use.
  * @output is a function that is called for each pixel, with input an index
  * into the palette.
- * data.width() and palette.width() is the number of channels the function uses.
- * Both values must be equal. It is up to the caller to make sure they match.
  * The function's return value is -1 on success, >= 0 if a color was not found,
  * with the value indicating the index.
  */
+template <typename T>
 int make_indexed(
-    Span2D<uint8_t> data,
-    Span2D<uint8_t> palette,
-    std::function<void(std::size_t)> output
-);
-
-/* Same function as above, but it takes the channels as a template constant. */
-template <unsigned Channels>
-int make_indexed(
-    std::span<std::array<uint8_t, Channels>> data,
-    std::span<const std::array<uint8_t, Channels>> palette,
+    std::span<uint8_t> data,
+    std::span<T> palette,
+    int channels,
     std::function<void(std::size_t)> output
 )
 {
-    for (auto c = 0u; c < data.size(); c += 1) {
-        std::size_t index = -1;
-        for (int i = 0; i < palette.size(); i++)
-            if (palette[i] == data[c])
-                index = i;
-        if (index == -1)
+    assert(palette[0].size() == channels && "mismatched channels");
+    assert(data.size() % channels == 0 && "size of data not a multiple of channels");
+    for (auto c = 0u; c < data.size(); c += channels) {
+        auto i = find_color(palette, data.subspan(c, channels));
+        if (i == -1)
             return c;
-        output(index);
+        output(i);
     }
     return -1;
 }
@@ -197,23 +188,17 @@ int make_indexed(
  * @output is a callback function that is called for each index, with input
  * a color.
  */
-template <unsigned Channels>
+template <typename T>
 void apply_palette(
     std::span<std::size_t> data,
-    std::span<const std::array<uint8_t, Channels>> palette,
-    std::function<void(std::array<uint8_t, Channels>)> output
+    std::span<T> palette,
+    int channels,
+    std::function<void(T)> output
 )
 {
     for (auto i : data)
         output(palette[i]);
 }
-
-/* Same as above, but the @channels parameter is not a constant. */
-void apply_palette(
-    std::span<std::size_t> data,
-    Span2D<uint8_t> palette,
-    std::function<void(std::span<uint8_t>)> output
-);
 
 /*
  * A helper function to calculate the height of the resulting image when
@@ -223,6 +208,9 @@ void apply_palette(
  * @bpp is the bytes per pixel the data uses.
  */
 long img_height(std::size_t num_bytes, int bpp);
+
+/* A helper function that returns the size for a palette of @bpp color depth. */
+constexpr inline int bpp_size(int bpp) { return std::pow(bpp, 2); }
 
 /*
  * Helper functions that returns a grayscale palette for use when decoding.
@@ -247,11 +235,5 @@ constexpr std::array<std::array<uint8_t, Channels>, N> grayscale_palette()
  * It returns palette values through the @output callback.
  */
 void grayscale_palette(int bpp, std::function<void(uint8_t)> output);
-
-/*
- * A helper function that returns the size for a palette of @bpp color depth,
- * useful when constructing palettes with the function above.
- */
-constexpr inline int bpp_size(int bpp) { return std::pow(bpp, 2); }
 
 } // namespace retrogfx

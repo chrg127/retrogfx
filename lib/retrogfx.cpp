@@ -172,31 +172,62 @@ namespace encoders {
     }
 } // namespace encoders
 
-std::array<u8, MAX_BPP*TILE_HEIGHT> encode_tile(Span2D<u8> tile, int bpp, Format format)
+// std::array<u8, MAX_BPP*TILE_HEIGHT> encode_tile(Span2D<u8> tile, int bpp, Format format)
+// {
+//     // printf("stride = %ld\n", tile.stride());
+//     std::array<u8, MAX_BPP*TILE_HEIGHT> res = {};
+//     for (auto y = 0u; y < TILE_HEIGHT; y++) {
+//         switch (format) {
+//         case Format::Planar:     encoders::planar(    res, tile[y], bpp, y); break;
+//         case Format::Interwined: encoders::interwined(res, tile[y], bpp, y); break;
+//         case Format::GBA:        encoders::gba(       res, tile[y], bpp, y); break;
+//         default: break;
+//         }
+//     }
+//     return res;
+// }
+
+// void encode(Span2D<u8> bytes, int bpp, Format format, std::function<void(std::span<uint8_t>)> write_data)
+// {
+//     if (bytes.width() % 8 != 0 || bytes.height() % 8 != 0) {
+//         std::fprintf(stderr, "error: width and height must be a power of 8");
+//         return;
+//     }
+//     for (auto y = 0u; y < bytes.height(); y += 8) {
+//         for (auto x = 0u; x < bytes.width(); x += 8) {
+//             auto tile = bytes.subspan(x, y, 8, 8);
+//             auto encoded = encode_tile(tile, bpp, format);
+//             std::span<u8> tilespan{encoded.begin(), encoded.begin() + bpp*8};
+//             write_data(tilespan);
+//         }
+//     }
+// }
+
+std::array<u8, MAX_BPP*TILE_HEIGHT> encode_tile(std::span<u8> indices, std::size_t index, std::size_t stride, int bpp, Format format)
 {
     std::array<u8, MAX_BPP*TILE_HEIGHT> res = {};
     for (auto y = 0u; y < TILE_HEIGHT; y++) {
+        auto row = indices.subspan(index + y * (stride + 8), 8);
         switch (format) {
-        case Format::Planar:     encoders::planar(    res, tile[y], bpp, y); break;
-        case Format::Interwined: encoders::interwined(res, tile[y], bpp, y); break;
-        case Format::GBA:        encoders::gba(       res, tile[y], bpp, y); break;
+        case Format::Planar:     encoders::planar(    res, row, bpp, y); break;
+        case Format::Interwined: encoders::interwined(res, row, bpp, y); break;
+        case Format::GBA:        encoders::gba(       res, row, bpp, y); break;
         default: break;
         }
     }
     return res;
 }
 
-void encode(Span2D<u8> bytes, int bpp, Format format,
-            std::function<void(std::span<uint8_t>)> write_data)
+void encode(std::span<u8> indices, std::size_t width, std::size_t height, int bpp, Format format, std::function<void(std::span<uint8_t>)> write_data)
 {
-    if (bytes.width() % 8 != 0 || bytes.height() % 8 != 0) {
+    if (width % 8 != 0 || height % 8 != 0) {
         std::fprintf(stderr, "error: width and height must be a power of 8");
         return;
     }
-    for (auto y = 0u; y < bytes.height(); y += 8) {
-        for (auto x = 0u; x < bytes.width(); x += 8) {
-            auto tile = bytes.subspan(x, y, 8, 8);
-            auto encoded = encode_tile(tile, bpp, format);
+    auto stride = width - 8;
+    for (auto y = 0u; y < height; y += 8) {
+        for (auto x = 0u; x < width; x += 8) {
+            auto encoded = encode_tile(indices, y * width + x, stride, bpp, format);
             std::span<u8> tilespan{encoded.begin(), encoded.begin() + bpp*8};
             write_data(tilespan);
         }

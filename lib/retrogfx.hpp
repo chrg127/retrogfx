@@ -60,43 +60,6 @@ inline std::optional<std::string_view> format_to_string(Format f)
     }
 }
 
-/* A 2D view over a 1D array. Used on functions below. */
-template <typename T>
-struct Span2D {
-    T *d;
-    std::size_t w, h, s;
-
-    constexpr Span2D() : d(nullptr), w(0), h(0), s(0) {}
-    constexpr Span2D(T *data, std::size_t width, std::size_t height, std::size_t stride)
-        : d(data), w(width), h(height), s(stride)
-    { }
-
-    constexpr Span2D(T *d, std::size_t w, std::size_t h) : Span2D(d, w, h, 0) { }
-    template <typename R> constexpr Span2D(R &&r, std::size_t w, std::size_t h) : Span2D(r.data(), w, h) { }
-
-    constexpr Span2D(const Span2D &) noexcept = default;
-    constexpr Span2D& operator=(const Span2D &) noexcept = default;
-
-    using element_type      = T;
-    using value_type        = std::remove_cv_t<T>;
-    using size_type         = std::size_t;
-    using reference         = std::span<T>;
-
-    constexpr reference front()                 const          { return this->operator[](0); }
-    constexpr reference back()                  const          { return this->operator[](w-1); }
-    constexpr reference operator[](size_type y) const          { return std::span{&d[y * (w + s)], w}; }
-    constexpr T *       data()                  const          { return d; }
-    constexpr size_type width()                 const noexcept { return w; }
-    constexpr size_type height()                const noexcept { return h; }
-    constexpr size_type stride()                const noexcept { return s; }
-    [[nodiscard]] constexpr bool empty()        const noexcept { return w == 0 || h == 0; }
-
-    constexpr Span2D<T> subspan(size_type x, size_type y, size_type width, size_type height) const
-    {
-        return Span2D(&d[y * (w + s) + x], width, height, s + (w - width));
-    }
-};
-
 /*
  * Decodes a given array of bytes into an indexed image.
  * @bytes are the bytes to decode.
@@ -116,27 +79,20 @@ void decode(
 /*
  * Encodes a given array of bytes, formatted as an indexed image, to a given
  * format.
- * @bytes is a 2D view over the array of bytes.
+ * @indices is the indexed image. @width and @height are self-explanatory.
  * @bpp is the bits per pixel to use; some formats may not support the given bpp.
  * @format describes the format in which the bytes should be encoded.
  * @write_data is a function that is called for each tile encoded. It has as
  * input the data of one tile encoded.
  */
 void encode(
-    Span2D<uint8_t> bytes,
+    std::span<uint8_t> indices,
+    std::size_t width,
+    std::size_t height,
     int bpp,
     Format format,
     std::function<void(std::span<uint8_t>)> write_data
 );
-
-/* Helper function for encode(). */
-inline void encode(
-    std::span<uint8_t> bytes, std::size_t width, std::size_t height, int bpp,
-    Format format, std::function<void(std::span<uint8_t>)> write_data
-)
-{
-    encode(Span2D<uint8_t>{bytes, width, height}, bpp, format, write_data);
-}
 
 /* Finds @color in @palette. Returns the index or -1 if not found. */
 template <typename T>
